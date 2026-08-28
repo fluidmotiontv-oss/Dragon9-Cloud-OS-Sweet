@@ -1,0 +1,6 @@
+{
+  "name": "Dragon 9 Cloud OS Suite",
+  "description": "Sovereign Cloud-Native Mobile Infrastructure, Thin-Client Cloud OS Simulator, LEO Satellite Backhaul & Zero-Trust Security Suite.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
