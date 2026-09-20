@@ -1,24 +1,40 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy, useCallback, useRef } from 'react';
 import { Navbar } from './components/Navbar';
-import { ThinClientSimulator } from './components/ThinClientSimulator';
-import { SatelliteBackhaulMap } from './components/SatelliteBackhaulMap';
-import { CloudOSContainerManager } from './components/CloudOSContainerManager';
-import { SovereignVault } from './components/SovereignVault';
-import { SipTelephonyDialer } from './components/SipTelephonyDialer';
-import { PillarComparison } from './components/PillarComparison';
-import { AIAssistantModal } from './components/AIAssistantModal';
-import { PartnershipGrantModal } from './components/PartnershipGrantModal';
 import { TelemetryData } from './types';
-import { Terminal, Shield, Radio, Activity, RefreshCw } from 'lucide-react';
+import { Terminal } from 'lucide-react';
+import { ToastContainer, ToastMessage } from './components/ToastContainer';
+
+const ThinClientSimulator = lazy(() => import('./components/ThinClientSimulator').then(m => ({ default: m.ThinClientSimulator })));
+const SatelliteBackhaulMap = lazy(() => import('./components/SatelliteBackhaulMap').then(m => ({ default: m.SatelliteBackhaulMap })));
+const CloudOSContainerManager = lazy(() => import('./components/CloudOSContainerManager').then(m => ({ default: m.CloudOSContainerManager })));
+const SovereignVault = lazy(() => import('./components/SovereignVault').then(m => ({ default: m.SovereignVault })));
+const SipTelephonyDialer = lazy(() => import('./components/SipTelephonyDialer').then(m => ({ default: m.SipTelephonyDialer })));
+const PillarComparison = lazy(() => import('./components/PillarComparison').then(m => ({ default: m.PillarComparison })));
+const AIAssistantModal = lazy(() => import('./components/AIAssistantModal').then(m => ({ default: m.AIAssistantModal })));
+const PartnershipGrantModal = lazy(() => import('./components/PartnershipGrantModal').then(m => ({ default: m.PartnershipGrantModal })));
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('simulator');
   const [telemetry, setTelemetry] = useState<TelemetryData | null>(null);
   const [isAiModalOpen, setIsAiModalOpen] = useState<boolean>(false);
   const [isGrantModalOpen, setIsGrantModalOpen] = useState<boolean>(false);
+  
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const lastProcessedTimeRef = useRef<number | null>(null);
 
-  // Poll live telemetry from Express backend
-  const fetchTelemetry = async () => {
+  const addToast = useCallback((level: 'CRITICAL' | 'SECURITY', message: string, source: string) => {
+    const id = Date.now().toString() + Math.random().toString(36).substring(2, 9);
+    setToasts(prev => [...prev, { id, level, message, source }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 5000);
+  }, []);
+
+  const removeToast = useCallback((id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  const fetchTelemetry = useCallback(async () => {
     try {
       const res = await fetch('/api/dragon9/telemetry');
       if (res.ok) {
@@ -28,15 +44,44 @@ export default function App() {
     } catch (err) {
       console.error('Error fetching Dragon 9 telemetry:', err);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchTelemetry();
     const interval = setInterval(fetchTelemetry, 3000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchTelemetry]);
 
-  const handleKillSession = async () => {
+  // Toast Notification Logic
+  useEffect(() => {
+    if (telemetry?.systemLogs) {
+      if (lastProcessedTimeRef.current === null) {
+        // Initial load: don't trigger toasts, just set the baseline timestamp
+        const maxTime = telemetry.systemLogs.reduce((max, log) => {
+          const t = new Date(log.timestamp).getTime();
+          return t > max ? t : max;
+        }, 0);
+        lastProcessedTimeRef.current = maxTime;
+        return;
+      }
+
+      let maxTime = lastProcessedTimeRef.current;
+      telemetry.systemLogs.forEach(log => {
+        const logTime = new Date(log.timestamp).getTime();
+        if (logTime > lastProcessedTimeRef.current!) {
+          if (log.level === 'CRITICAL' || log.level === 'SECURITY') {
+            addToast(log.level, log.message, log.source);
+          }
+          if (logTime > maxTime) {
+            maxTime = logTime;
+          }
+        }
+      });
+      lastProcessedTimeRef.current = maxTime;
+    }
+  }, [telemetry, addToast]);
+
+  const handleKillSession = useCallback(async () => {
     try {
       await fetch('/api/dragon9/action', {
         method: 'POST',
@@ -47,9 +92,9 @@ export default function App() {
     } catch (err) {
       console.error('Kill session failed:', err);
     }
-  };
+  }, [fetchTelemetry]);
 
-  const handleReconnectSession = async () => {
+  const handleReconnectSession = useCallback(async () => {
     try {
       await fetch('/api/dragon9/action', {
         method: 'POST',
@@ -60,9 +105,9 @@ export default function App() {
     } catch (err) {
       console.error('Reconnect session failed:', err);
     }
-  };
+  }, [fetchTelemetry]);
 
-  const handleFailoverSatellite = async (nodeName: string) => {
+  const handleFailoverSatellite = useCallback(async (nodeName: string) => {
     try {
       await fetch('/api/dragon9/action', {
         method: 'POST',
@@ -73,9 +118,9 @@ export default function App() {
     } catch (err) {
       console.error('Failover satellite failed:', err);
     }
-  };
+  }, [fetchTelemetry]);
 
-  const handleWipeVault = async () => {
+  const handleWipeVault = useCallback(async () => {
     try {
       await fetch('/api/dragon9/action', {
         method: 'POST',
@@ -86,9 +131,9 @@ export default function App() {
     } catch (err) {
       console.error('Wipe vault failed:', err);
     }
-  };
+  }, [fetchTelemetry]);
 
-  const handleRestartWaydroid = async (instanceId: string) => {
+  const handleRestartWaydroid = useCallback(async (instanceId: string) => {
     try {
       await fetch('/api/dragon9/action', {
         method: 'POST',
@@ -99,7 +144,19 @@ export default function App() {
     } catch (err) {
       console.error('Restart container failed:', err);
     }
-  };
+  }, [fetchTelemetry]);
+
+  // Keyboard shortcut for AI Diagnostics
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsAiModalOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
@@ -118,42 +175,46 @@ export default function App() {
       {/* Main Content Viewport */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4">
         
-        {activeTab === 'simulator' && (
-          <ThinClientSimulator
-            telemetry={telemetry}
-            onKillSession={handleKillSession}
-            onReconnectSession={handleReconnectSession}
-          />
-        )}
+        <ToastContainer toasts={toasts} removeToast={removeToast} />
 
-        {activeTab === 'backhaul' && (
-          <SatelliteBackhaulMap
-            telemetry={telemetry}
-            onFailoverSatellite={handleFailoverSatellite}
-          />
-        )}
+        <Suspense fallback={<div className="p-8 text-center text-slate-400 font-mono text-xs">Loading module...</div>}>
+          {activeTab === 'simulator' && (
+            <ThinClientSimulator
+              telemetry={telemetry}
+              onKillSession={handleKillSession}
+              onReconnectSession={handleReconnectSession}
+            />
+          )}
 
-        {activeTab === 'containers' && (
-          <CloudOSContainerManager
-            telemetry={telemetry}
-            onRestartWaydroid={handleRestartWaydroid}
-          />
-        )}
+          {activeTab === 'backhaul' && (
+            <SatelliteBackhaulMap
+              telemetry={telemetry}
+              onFailoverSatellite={handleFailoverSatellite}
+            />
+          )}
 
-        {activeTab === 'vault' && (
-          <SovereignVault
-            telemetry={telemetry}
-            onWipeVault={handleWipeVault}
-          />
-        )}
+          {activeTab === 'containers' && (
+            <CloudOSContainerManager
+              telemetry={telemetry}
+              onRestartWaydroid={handleRestartWaydroid}
+            />
+          )}
 
-        {activeTab === 'sip' && (
-          <SipTelephonyDialer />
-        )}
+          {activeTab === 'vault' && (
+            <SovereignVault
+              telemetry={telemetry}
+              onWipeVault={handleWipeVault}
+            />
+          )}
 
-        {activeTab === 'pillars' && (
-          <PillarComparison />
-        )}
+          {activeTab === 'sip' && (
+            <SipTelephonyDialer />
+          )}
+
+          {activeTab === 'pillars' && (
+            <PillarComparison />
+          )}
+        </Suspense>
 
         {/* Live System Logs Feed Banner */}
         <section className="mt-8 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl font-mono text-xs">
@@ -202,8 +263,9 @@ export default function App() {
           </div>
 
           <div className="flex items-center space-x-4 text-[11px]">
-            <button onClick={() => setIsAiModalOpen(true)} className="text-slate-400 hover:text-amber-400 transition-colors">
-              AI Diagnostics
+            <button onClick={() => setIsAiModalOpen(true)} className="text-slate-400 hover:text-amber-400 transition-colors flex items-center gap-1.5">
+              <span>AI Diagnostics</span>
+              <kbd className="hidden sm:inline-block px-1.5 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-[9px] font-sans text-slate-500">⌘K</kbd>
             </button>
             <span>•</span>
             <button onClick={() => setIsGrantModalOpen(true)} className="text-slate-400 hover:text-amber-400 transition-colors">
@@ -216,16 +278,18 @@ export default function App() {
       </footer>
 
       {/* Modals & Drawers */}
-      <AIAssistantModal
-        isOpen={isAiModalOpen}
-        onClose={() => setIsAiModalOpen(false)}
-        telemetry={telemetry}
-      />
+      <Suspense fallback={null}>
+        <AIAssistantModal
+          isOpen={isAiModalOpen}
+          onClose={() => setIsAiModalOpen(false)}
+          telemetry={telemetry}
+        />
 
-      <PartnershipGrantModal
-        isOpen={isGrantModalOpen}
-        onClose={() => setIsGrantModalOpen(false)}
-      />
+        <PartnershipGrantModal
+          isOpen={isGrantModalOpen}
+          onClose={() => setIsGrantModalOpen(false)}
+        />
+      </Suspense>
 
     </div>
   );
